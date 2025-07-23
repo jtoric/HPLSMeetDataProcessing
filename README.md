@@ -32,7 +32,7 @@ Stavite sljedeće datoteke u `bjelovar/` mapu:
 ### Izlazne datoteke
 
 #### Glavni izvještaj
-- **`Bjelovar_Record_Breakers_Rezultati.xlsx`** - konačni Excel izvještaj
+- **`bjelovar/Bjelovar_Record_Breakers_Rezultati.xlsx`** - konačni Excel izvještaj
 
 #### Međusobni CSV-ovi (zadržani)
 - `powerlifting_results_processed.csv` - obrađeni osnovni podaci

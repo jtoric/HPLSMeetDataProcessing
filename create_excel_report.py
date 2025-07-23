@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -281,7 +282,8 @@ def create_pretty_excel():
     wb.active = wb["Muški Powerlifting"]
     
     # Save the workbook
-    filename = "Bjelovar_Record_Breakers_Rezultati.xlsx"
+    os.makedirs("bjelovar", exist_ok=True)
+    filename = "bjelovar/Bjelovar_Record_Breakers_Rezultati.xlsx"
     wb.save(filename)
     print(f"\n✅ Excel datoteka '{filename}' uspješno kreirana!")
     print(f"📊 Ukupno stranica: {len(wb.sheetnames)}")

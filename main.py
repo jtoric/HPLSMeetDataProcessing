@@ -140,7 +140,7 @@ def main():
     print("   • Male_Bench_Only.csv, Female_Bench_Only.csv")
     print("   • Male_Powerlifting_Ranking.csv, Female_Powerlifting_Ranking.csv") 
     print("   • Male_Bench_Only_Ranking.csv, Female_Bench_Only_Ranking.csv")
-    print("   • Bjelovar_Record_Breakers_Rezultati.xlsx")
+    print("   • bjelovar/Bjelovar_Record_Breakers_Rezultati.xlsx")
     print("\n🏆 Gotovo! Excel izvještaj je spreman za korištenje.")
 
 if __name__ == "__main__":
