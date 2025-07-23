@@ -179,4 +179,4 @@ Desktop.ini
 #bjelovar/
 
 # But keep the sample input files in version control for documentation
-# !bjelovar/*.csv 
+!bjelovar/*.csv 
