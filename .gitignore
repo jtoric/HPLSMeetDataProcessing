@@ -174,9 +174,3 @@ Desktop.ini
 
 # Project-specific ignores
 # Uncomment these if you don't want to commit the generated files:
-#*.xlsx
-*.csv
-#bjelovar/
-
-# But keep the sample input files in version control for documentation
-!bjelovar/*.csv 

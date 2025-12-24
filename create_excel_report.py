@@ -1,30 +1,45 @@
+"""
+Excel Report Generator for Powerlifting Competition Results
+
+This module creates formatted Excel reports from processed powerlifting data,
+including individual results, club rankings, and statistics.
+"""
+
 import pandas as pd
-import os
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.worksheet.table import Table, TableStyleInfo
 
 def get_division_type(division_name):
     """Extract division type from full division name"""
-    # More precise matching for Master divisions
-    # Note: Guest divisions are treated as Open for statistical purposes
-    if 'Master IV' in division_name:
+    # Normalize and detect division types, supporting plural and numeric Masters labels
+    # Handle NaN/float values
+    if pd.isna(division_name):
+        return 'Open'
+    text = str(division_name).strip() or ''
+    
+    # Normalize text for comparison
+    text_lower = text.lower()
+    
+    # Check for Master divisions (various formats)
+    if 'master iv' in text_lower or 'masters 4' in text_lower or text == 'Master 4':
         return 'Master IV'
-    elif 'Master III' in division_name:
+    elif 'master iii' in text_lower or 'masters 3' in text_lower or text == 'Master 3':
         return 'Master III'
-    elif 'Master II' in division_name:
+    elif 'master ii' in text_lower or 'masters 2' in text_lower or text == 'Master 2':
         return 'Master II'
-    elif 'Master I' in division_name:
+    elif 'master i' in text_lower or 'masters 1' in text_lower or text == 'Master 1':
         return 'Master I'
-    elif 'Sub-Junior' in division_name:
+    # Check for Sub-Junior/Kadet (various formats)
+    elif 'sub-junior' in text_lower or 'sub-juniors' in text_lower or text_lower == 'kadet' or text == 'Kadet':
         return 'Sub-Junior'
-    elif 'Junior' in division_name and 'Sub-Junior' not in division_name:
+    # Check for Junior (but not Sub-Junior)
+    elif (('junior' in text_lower) or ('juniors' in text_lower)) and ('sub-junior' not in text_lower and 'sub-juniors' not in text_lower and text_lower != 'kadet'):
         return 'Junior'
-    elif 'Open' in division_name or 'Guest' in division_name:
-        return 'Open'  # Guest is grouped with Open for statistics
+    # Check for Open
+    elif 'open' in text_lower or 'guest' in text_lower:
+        return 'Open'
     else:
-        return 'Open'  # Default
+        return 'Open'
 
 def translate_column_headers(columns):
     """Translate English column headers to Croatian"""
@@ -58,6 +73,10 @@ def translate_column_headers(columns):
 
 def translate_division_name(division_name):
     """Translate English division names to Croatian"""
+    # Handle NaN/float values
+    if pd.isna(division_name):
+        return 'Open'
+    division_name = str(division_name)
     # Handle gender prefixes
     gender_prefix = ""
     if division_name.startswith("Men's"):
@@ -76,7 +95,10 @@ def translate_division_name(division_name):
         bench_only = " Potisak s klupe"
         division_name = division_name.replace(" Bench Only", "")
     
-    # Translate division types (order matters - check longest matches first to avoid partial replacements)
+    # Normalize Masters numeric to roman for translation
+    division_name = division_name.replace('Masters 4', 'Master IV').replace('Masters 3', 'Master III').replace('Masters 2', 'Master II').replace('Masters 1', 'Master I')
+    
+    # Translate division types (order matters)
     if 'Master IV' in division_name:
         division_name = division_name.replace('Master IV', 'Veterani 4')
     elif 'Master III' in division_name:
@@ -85,10 +107,10 @@ def translate_division_name(division_name):
         division_name = division_name.replace('Master II', 'Veterani 2')
     elif 'Master I' in division_name:
         division_name = division_name.replace('Master I', 'Veterani 1')
-    elif 'Sub-Junior' in division_name:
-        division_name = division_name.replace('Sub-Junior', 'Kadeti')
-    elif 'Junior' in division_name:
-        division_name = division_name.replace('Junior', 'Juniori')
+    elif 'Sub-Junior' in division_name or 'Sub-Juniors' in division_name:
+        division_name = division_name.replace('Sub-Juniors', 'Kadeti').replace('Sub-Junior', 'Kadeti')
+    elif 'Junior' in division_name or 'Juniors' in division_name:
+        division_name = division_name.replace('Juniors', 'Juniori')
     elif 'Open' in division_name:
         division_name = division_name.replace('Open', 'Seniori')
     elif 'Guest' in division_name:
@@ -150,28 +172,8 @@ def sort_by_categories(df):
         'Master IV': 7
     }
     
-    # Extract division type from full division name
-    def get_division_type(division_name):
-        # More precise matching for Master divisions
-        if 'Master IV' in division_name:
-            return 'Master IV'
-        elif 'Master III' in division_name:
-            return 'Master III'
-        elif 'Master II' in division_name:
-            return 'Master II'
-        elif 'Master I' in division_name:
-            return 'Master I'
-        elif 'Sub-Junior' in division_name:
-            return 'Sub-Junior'
-        elif 'Junior' in division_name and 'Sub-Junior' not in division_name:
-            return 'Junior'
-        elif 'Open' in division_name:
-            return 'Open'
-        else:
-            return 'Open'  # Default
-    
-    # Add division order column
-    df['DivisionOrder'] = df['Division'].apply(lambda x: division_order.get(get_division_type(x), 3))
+    # Add division order column (handle NaN values)
+    df['DivisionOrder'] = df['Division'].fillna('Open').apply(lambda x: division_order.get(get_division_type(x), 3))
     
     # Convert WeightClassKg to numeric for proper sorting, handling superheavyweight classes
     def weight_sort_key(weight_class_str):
@@ -201,11 +203,27 @@ def sort_by_categories(df):
     
     return df_sorted
 
-def create_pretty_excel():
-    """Create a beautifully formatted Excel file from processed powerlifting data"""
+def create_pretty_excel(equipment_filter: str = 'Raw', output_filename: str = None):
+    """Create a beautifully formatted Excel file from processed powerlifting data.
+    equipment_filter: 'Raw' | 'Equipped' | None (None = no filter)
+    output_filename: optional explicit output filename
+    """
     
     # Read the processed data
-    df = pd.read_csv('powerlifting_results_processed.csv')
+    df_full = pd.read_csv('powerlifting_results_processed.csv')
+    
+    # Provjeri da li postoji Equipment kolona
+    has_equipment = 'Equipment' in df_full.columns
+    
+    # Apply equipment filtering za rezultate (samo ako je specificiran filter)
+    # Za rang klubova koristimo puni dataset da vidimo Raw i Equipped odvojeno
+    if equipment_filter in ('Raw', 'Equipped') and has_equipment:
+        if equipment_filter == 'Raw':
+            df = df_full[df_full['Equipment'] == 'Raw'].copy()
+        else:  # Equipped
+            df = df_full[df_full['Equipment'] == 'Equipped'].copy()
+    else:
+        df = df_full.copy()
     
     # Create workbook
     wb = Workbook()
@@ -271,7 +289,8 @@ def create_pretty_excel():
     # 5. Club Rankings Summary Sheet
     print("Kreiranje 'Rang Klubova' stranice...")
     ws_clubs = wb.create_sheet("Rang Klubova")
-    create_club_summary_sheet(ws_clubs, header_font, header_fill, header_alignment, data_font, data_alignment, border)
+    # Uvijek koristi puni dataset (bez filtera) za rang klubova da vidimo Raw i Equipped odvojeno
+    create_club_summary_sheet_with_equipment(ws_clubs, df_full, header_font, header_fill, header_alignment, data_font, data_alignment, border)
     
     # 6. Statistics Sheet
     print("Kreiranje 'Statistika' stranice...")
@@ -282,13 +301,20 @@ def create_pretty_excel():
     wb.active = wb["Muški Powerlifting"]
     
     # Save the workbook
-    os.makedirs("bjelovar", exist_ok=True)
-    filename = "bjelovar/Bjelovar_Record_Breakers_Rezultati.xlsx"
+    if output_filename:
+        filename = output_filename
+    else:
+        if equipment_filter == 'Equipped':
+            filename = "rezultati_equipped.xlsx"
+        elif equipment_filter == 'Raw':
+            filename = "rezultati.xlsx"
+        else:
+            filename = "rezultati.xlsx"
     wb.save(filename)
-    print(f"\n✅ Excel datoteka '{filename}' uspješno kreirana!")
-    print(f"📊 Ukupno stranica: {len(wb.sheetnames)}")
-    print(f"📈 Ukupno zapisa: {len(df)}")
-    print("📋 Stranice: Muški Powerlifting, Ženski Powerlifting, Muški Potisak s klupe, Ženski Potisak s klupe, Rang Klubova, Statistika")
+    print(f"\n[OK] Excel datoteka '{filename}' uspjesno kreirana!")
+    print(f"Ukupno stranica: {len(wb.sheetnames)}")
+    print(f"Ukupno zapisa: {len(df)}")
+    print("Stranice: Muski Powerlifting, Zenski Powerlifting, Muski Potisak s klupe, Zenski Potisak s klupe, Rang Klubova, Statistika")
     
     return filename
 
@@ -306,8 +332,8 @@ def create_formatted_sheet(worksheet, data, header_font, header_fill, header_ali
     # Create a copy to avoid modifying original data
     data_copy = data.copy()
     
-    # Create division type mapping
-    data_copy['DivisionType'] = data_copy['Division'].apply(get_division_type)
+    # Create division type mapping (handle NaN values)
+    data_copy['DivisionType'] = data_copy['Division'].fillna('Open').apply(get_division_type)
     
     # Create weight class sorting key that handles superheavyweight classes
     def weight_sort_key(weight_class_str):
@@ -341,7 +367,10 @@ def create_formatted_sheet(worksheet, data, header_font, header_fill, header_ali
     unique_combinations = []
     seen = set()
     for _, row in data_sorted.iterrows():
-        combo = (row['Division'], row['WeightClassKg'])
+        # Handle NaN values
+        division_val = row['Division'] if pd.notna(row['Division']) else 'Open'
+        weight_class_val = row['WeightClassKg'] if pd.notna(row['WeightClassKg']) else ''
+        combo = (division_val, weight_class_val)
         if combo not in seen:
             unique_combinations.append(combo)
             seen.add(combo)
@@ -351,8 +380,10 @@ def create_formatted_sheet(worksheet, data, header_font, header_fill, header_ali
     
     for division, weight_class in unique_combinations:
         # Filter data for this specific combination
-        group_data = data_sorted[(data_sorted['Division'] == division) & 
-                                (data_sorted['WeightClassKg'] == weight_class)]
+        # Handle NaN values in comparison
+        division_mask = data_sorted['Division'].fillna('Open') == division
+        weight_mask = data_sorted['WeightClassKg'].fillna('') == weight_class
+        group_data = data_sorted[division_mask & weight_mask]
         
         # Get division type for this combination
         division_type = get_division_type(division)
@@ -380,7 +411,8 @@ def create_formatted_sheet(worksheet, data, header_font, header_fill, header_ali
         
         # Add category header (weight class specific, except for guests)
         translated_division = translate_division_name(division)
-        if 'Guest' in division:
+        division_str = str(division) if pd.notna(division) else ''
+        if 'Guest' in division_str:
             category_title = translated_division  # No weight class for guests
         else:
             category_title = f"{translated_division} - {weight_class}kg"
@@ -430,28 +462,119 @@ def create_formatted_sheet(worksheet, data, header_font, header_fill, header_ali
     # Auto-adjust column widths
     auto_fit_columns(worksheet)
 
-def create_club_summary_sheet(worksheet, header_font, header_fill, header_alignment, data_font, data_alignment, border):
-    """Create club rankings summary sheet"""
+
+def create_club_summary_sheet_with_equipment(worksheet, df, header_font, header_fill, header_alignment, data_font, data_alignment, border):
+    """Create club rankings summary sheet with separate Raw and Equipped rankings."""
     
-    # Read club ranking files
+    # Provjeri da li postoji Equipment kolona
+    has_equipment = 'Equipment' in df.columns
+    
+    # Definiraj kategorije
     categories = [
-        ('Male_Powerlifting_Ranking.csv', 'Muški Powerlifting'),
-        ('Female_Powerlifting_Ranking.csv', 'Ženski Powerlifting'),
-        ('Male_Bench_Only_Ranking.csv', 'Muški Potisak s klupe'),
-        ('Female_Bench_Only_Ranking.csv', 'Ženski Potisak s klupe')
+        ((df['Sex'] == 'M') & (df['Event'] == 'SBD'), 'Muški Powerlifting'),
+        ((df['Sex'] == 'F') & (df['Event'] == 'SBD'), 'Ženski Powerlifting'),
+        ((df['Sex'] == 'M') & (df['Event'] == 'B'), 'Muški Potisak s klupe'),
+        ((df['Sex'] == 'F') & (df['Event'] == 'B'), 'Ženski Potisak s klupe')
     ]
     
     current_row = 1
     
-    for filename, category_name in categories:
-        try:
-            df_ranking = pd.read_csv(filename)
+    for mask, category_name in categories:
+        category_data = df[mask]
+        if category_data.empty:
+            continue
+        
+        # Dodaj naslov kategorije
+        worksheet.cell(row=current_row, column=1, value=f"{category_name} Rang Klubova").font = Font(size=14, bold=True)
+        current_row += 2
+        
+        # Ako ima Equipment kolonu, odvoji Raw i Equipped
+        if has_equipment:
+            # RAW rang (bez naslova - podrazumijeva se)
+            raw_data = category_data[category_data['Equipment'] == 'Raw']
             
-            # Add category header
-            worksheet.cell(row=current_row, column=1, value=f"{category_name} Rang Klubova").font = Font(size=14, bold=True)
-            current_row += 2
+            # Provjeri da li ima Equipped podataka
+            equipped_data = category_data[category_data['Equipment'] == 'Equipped']
+            has_equipped = not equipped_data.empty
             
-            # Add column headers
+            if not raw_data.empty:
+                # Headers (bez "RAW" naslova)
+                headers = ['Mjesto', 'Klub', 'Bodovi']
+                for col_idx, header in enumerate(headers, 1):
+                    cell = worksheet.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+                    cell.border = border
+                current_row += 1
+                
+                # Compute top-5 per club by Points, then sum
+                # Uzmi samo top-5 natjecatelja po klubu
+                top5_per_club = raw_data.sort_values('Points', ascending=False).groupby('Club').head(5)
+                club_points = top5_per_club.groupby('Club')['Points'].sum().reset_index()
+                club_points = club_points.sort_values('Points', ascending=False).reset_index(drop=True)
+                club_points['Place'] = range(1, len(club_points) + 1)
+                
+                for _, row in club_points.iterrows():
+                    for col_idx, value in enumerate([row['Place'], row['Club'], round(row['Points'], 2)], 1):
+                        cell = worksheet.cell(row=current_row, column=col_idx, value=value)
+                        cell.font = data_font
+                        cell.alignment = data_alignment
+                        cell.border = border
+                        if row['Place'] == 1:
+                            cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                        elif row['Place'] == 2:
+                            cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')
+                        elif row['Place'] == 3:
+                            cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')
+                    current_row += 1
+                
+                # Samo ako ima Equipped, dodaj razmak
+                if has_equipped:
+                    current_row += 2
+            
+            # EQUIPPED rang (samo ako postoji)
+            if has_equipped:
+                worksheet.cell(row=current_row, column=1, value="EQUIPPED").font = Font(size=12, bold=True, color='C65911')
+                current_row += 1
+                
+                # Headers
+                headers = ['Mjesto', 'Klub', 'Bodovi']
+                for col_idx, header in enumerate(headers, 1):
+                    cell = worksheet.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+                    cell.border = border
+                current_row += 1
+                
+                # Compute top-5 per club by Points, then sum
+                # Uzmi samo top-5 natjecatelja po klubu
+                top5_per_club = equipped_data.sort_values('Points', ascending=False).groupby('Club').head(5)
+                club_points = top5_per_club.groupby('Club')['Points'].sum().reset_index()
+                club_points = club_points.sort_values('Points', ascending=False).reset_index(drop=True)
+                club_points['Place'] = range(1, len(club_points) + 1)
+                
+                for _, row in club_points.iterrows():
+                    for col_idx, value in enumerate([row['Place'], row['Club'], round(row['Points'], 2)], 1):
+                        cell = worksheet.cell(row=current_row, column=col_idx, value=value)
+                        cell.font = data_font
+                        cell.alignment = data_alignment
+                        cell.border = border
+                        if row['Place'] == 1:
+                            cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                        elif row['Place'] == 2:
+                            cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')
+                        elif row['Place'] == 3:
+                            cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')
+                    current_row += 1
+                current_row += 2  # Space before next category
+            else:
+                # Ako nema Equipped, samo dodaj razmak
+                current_row += 2
+        else:
+            # Ako nema Equipment kolonu, koristi standardni pristup
+            # Headers
             headers = ['Mjesto', 'Klub', 'Bodovi']
             for col_idx, header in enumerate(headers, 1):
                 cell = worksheet.cell(row=current_row, column=col_idx, value=header)
@@ -459,34 +582,32 @@ def create_club_summary_sheet(worksheet, header_font, header_fill, header_alignm
                 cell.fill = header_fill
                 cell.alignment = header_alignment
                 cell.border = border
-            
             current_row += 1
             
-            # Add data
-            for _, row_data in df_ranking.iterrows():
-                for col_idx, value in enumerate([row_data['Place'], row_data['Club'], row_data['Points']], 1):
+            # Compute top-5 per club by Points, then sum
+            # Uzmi samo top-5 natjecatelja po klubu
+            top5_per_club = category_data.sort_values('Points', ascending=False).groupby('Club').head(5)
+            club_points = top5_per_club.groupby('Club')['Points'].sum().reset_index()
+            club_points = club_points.sort_values('Points', ascending=False).reset_index(drop=True)
+            club_points['Place'] = range(1, len(club_points) + 1)
+            
+            for _, row in club_points.iterrows():
+                for col_idx, value in enumerate([row['Place'], row['Club'], round(row['Points'], 2)], 1):
                     cell = worksheet.cell(row=current_row, column=col_idx, value=value)
                     cell.font = data_font
                     cell.alignment = data_alignment
                     cell.border = border
-                    
-                    # Medal colors for club rankings
-                    if row_data['Place'] == 1:
-                        cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')  # Gold
-                    elif row_data['Place'] == 2:
-                        cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')  # Silver
-                    elif row_data['Place'] == 3:
-                        cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')  # Bronze
-                
+                    if row['Place'] == 1:
+                        cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                    elif row['Place'] == 2:
+                        cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')
+                    elif row['Place'] == 3:
+                        cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')
                 current_row += 1
-            
-            current_row += 2  # Space between categories
-            
-        except Exception as e:
-            print(f"Nije moguće učitati {filename}: {e}")
+            current_row += 2  # Space before next category
     
-    # Auto-adjust column widths
     auto_fit_columns(worksheet)
+
 
 def create_statistics_sheet(worksheet, df, header_font, header_fill, header_alignment, data_font, data_alignment, border):
     """Create statistics summary sheet"""
@@ -520,71 +641,140 @@ def create_statistics_sheet(worksheet, df, header_font, header_fill, header_alig
     # Get unique divisions and sort them
     division_order = ['Sub-Junior', 'Junior', 'Open', 'Master I', 'Master II', 'Master III', 'Master IV']
     
-    def get_division_type(division_name):
-        # More precise matching for Master divisions
-        # Note: Guest divisions are treated as Open for statistical purposes
-        if 'Master IV' in division_name:
-            return 'Master IV'
-        elif 'Master III' in division_name:
-            return 'Master III'
-        elif 'Master II' in division_name:
-            return 'Master II'
-        elif 'Master I' in division_name:
-            return 'Master I'
-        elif 'Sub-Junior' in division_name:
-            return 'Sub-Junior'
-        elif 'Junior' in division_name and 'Sub-Junior' not in division_name:
-            return 'Junior'
-        elif 'Open' in division_name or 'Guest' in division_name:
-            return 'Open'  # Guest is grouped with Open for statistics
-        else:
-            return 'Open'  # Default
-    
-    # Group by division type
-    df['DivisionType'] = df['Division'].apply(get_division_type)
+    # Group by division type (handle NaN values)
+    df['DivisionType'] = df['Division'].fillna('Open').apply(get_division_type)
     
     def create_top_5_section(title, data, current_row):
-        """Helper function to create a top 5 section"""
+        """Helper function to create a top 5 section with optional Raw/Equipped split"""
         if len(data) == 0:
             return current_row
-            
-        worksheet.cell(row=current_row, column=1, value=title).font = Font(size=12, bold=True)
-        current_row += 2
         
-        # Headers
-        headers = ['Rang', 'Ime', 'Klub', 'Ukupno (kg)', 'GL Bodovi']
-        for col_idx, header in enumerate(headers, 1):
-            cell = worksheet.cell(row=current_row, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-            cell.border = border
+        # Check if we should split by equipment
+        has_equipment = 'Equipment' in data.columns
+        has_equipped = has_equipment and (data['Equipment'] == 'Equipped').any()
         
-        current_row += 1
-        
-        # Top 5 in category
-        top_5 = data.nlargest(5, 'Points')
-        for rank, (_, performer) in enumerate(top_5.iterrows(), 1):
-            values = [rank, performer['Name'], performer['Club'],
-                     performer['TotalKg'], f"{performer['Points']:.2f}"]
-            
-            for col_idx, value in enumerate(values, 1):
-                cell = worksheet.cell(row=current_row, column=col_idx, value=value)
-                cell.font = data_font
-                cell.alignment = data_alignment
-                cell.border = border
+        if has_equipment and has_equipped:
+            # RAW Top 5 (bez naslova - podrazumijeva se)
+            raw_data = data[data['Equipment'] == 'Raw']
+            if len(raw_data) > 0:
+                worksheet.cell(row=current_row, column=1, value=title).font = Font(size=12, bold=True)
+                current_row += 2
                 
-                # Medal colors
-                if rank == 1:
-                    cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')  # Gold
-                elif rank == 2:
-                    cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')  # Silver
-                elif rank == 3:
-                    cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')  # Bronze
+                # Headers
+                headers = ['Rang', 'Ime', 'Klub', 'Ukupno (kg)', 'GL Bodovi']
+                for col_idx, header in enumerate(headers, 1):
+                    cell = worksheet.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+                    cell.border = border
+                
+                current_row += 1
+                
+                # Top 5 in category
+                top_5 = raw_data.nlargest(5, 'Points')
+                for rank, (_, performer) in enumerate(top_5.iterrows(), 1):
+                    values = [rank, performer['Name'], performer['Club'],
+                             performer['TotalKg'], f"{performer['Points']:.2f}"]
+                    
+                    for col_idx, value in enumerate(values, 1):
+                        cell = worksheet.cell(row=current_row, column=col_idx, value=value)
+                        cell.font = data_font
+                        cell.alignment = data_alignment
+                        cell.border = border
+                        
+                        # Medal colors
+                        if rank == 1:
+                            cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                        elif rank == 2:
+                            cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')
+                        elif rank == 3:
+                            cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')
+                    
+                    current_row += 1
+                
+                current_row += 2  # Space after section
+            
+            # EQUIPPED Top 5 (samo ako postoji)
+            equipped_data = data[data['Equipment'] == 'Equipped']
+            if len(equipped_data) > 0:
+                worksheet.cell(row=current_row, column=1, value=f"{title} - EQUIPPED").font = Font(size=12, bold=True, color='C65911')
+                current_row += 2
+                
+                # Headers
+                headers = ['Rang', 'Ime', 'Klub', 'Ukupno (kg)', 'GL Bodovi']
+                for col_idx, header in enumerate(headers, 1):
+                    cell = worksheet.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+                    cell.border = border
+                
+                current_row += 1
+                
+                # Top 5 in category
+                top_5 = equipped_data.nlargest(5, 'Points')
+                for rank, (_, performer) in enumerate(top_5.iterrows(), 1):
+                    values = [rank, performer['Name'], performer['Club'],
+                             performer['TotalKg'], f"{performer['Points']:.2f}"]
+                    
+                    for col_idx, value in enumerate(values, 1):
+                        cell = worksheet.cell(row=current_row, column=col_idx, value=value)
+                        cell.font = data_font
+                        cell.alignment = data_alignment
+                        cell.border = border
+                        
+                        # Medal colors
+                        if rank == 1:
+                            cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                        elif rank == 2:
+                            cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')
+                        elif rank == 3:
+                            cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')
+                    
+                    current_row += 1
+                
+                current_row += 2  # Space after section
+        else:
+            # Standard approach (no equipment split)
+            worksheet.cell(row=current_row, column=1, value=title).font = Font(size=12, bold=True)
+            current_row += 2
+            
+            # Headers
+            headers = ['Rang', 'Ime', 'Klub', 'Ukupno (kg)', 'GL Bodovi']
+            for col_idx, header in enumerate(headers, 1):
+                cell = worksheet.cell(row=current_row, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = border
             
             current_row += 1
+            
+            # Top 5 in category
+            top_5 = data.nlargest(5, 'Points')
+            for rank, (_, performer) in enumerate(top_5.iterrows(), 1):
+                values = [rank, performer['Name'], performer['Club'],
+                         performer['TotalKg'], f"{performer['Points']:.2f}"]
+                
+                for col_idx, value in enumerate(values, 1):
+                    cell = worksheet.cell(row=current_row, column=col_idx, value=value)
+                    cell.font = data_font
+                    cell.alignment = data_alignment
+                    cell.border = border
+                    
+                    # Medal colors
+                    if rank == 1:
+                        cell.fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                    elif rank == 2:
+                        cell.fill = PatternFill(start_color='C0C0C0', end_color='C0C0C0', fill_type='solid')
+                    elif rank == 3:
+                        cell.fill = PatternFill(start_color='CD7F32', end_color='CD7F32', fill_type='solid')
+                
+                current_row += 1
+            
+            current_row += 2  # Space after section
         
-        current_row += 2  # Space after section
         return current_row
     
     # 1. MALE POWERLIFTING SECTION
@@ -644,7 +834,7 @@ def create_statistics_sheet(worksheet, df, header_font, header_fill, header_alig
 
 if __name__ == "__main__":
     try:
-        create_pretty_excel()
+        create_pretty_excel('Raw')
     except Exception as e:
         print(f"Greška pri kreiranju Excel datoteke: {e}")
-        print("Provjerite je li instaliran openpyxl: pip install openpyxl") 
+        print("Provjerite je li instaliran openpyxl: pip install openpyxl")

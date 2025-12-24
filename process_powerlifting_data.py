@@ -1,9 +1,15 @@
 import pandas as pd
 import numpy as np
 import math
+from data_loader import load_results, load_clubs
 
 def calculate_ipf_gl_points(bodyweight, total, sex, event):
-    """Calculate IPF GL Points using official IPF formula: 100/(A-B*exp(-C*bodyweight))"""
+    """
+    Calculate IPF GL Points using official IPF formula: 100/(A-B*exp(-C*bodyweight))
+    
+    NOTE: Ova funkcija se koristi samo kao fallback ako Points nisu dostupni u podacima.
+    U većini slučajeva, Points se uzimaju direktno iz rezultata (kolona "Points" ili "Goodlift").
+    """
     if pd.isna(bodyweight) or pd.isna(total) or total == 0:
         return 0
     
@@ -35,109 +41,166 @@ def calculate_ipf_gl_points(bodyweight, total, sex, event):
     except:
         return 0
 
-def process_powerlifting_data():
-    # Read the detailed competition results (OPL format)
-    # Skip first 4 rows (lines 1-4), use line 5 as header
-    df_detailed = pd.read_csv('bjelovar/3-bjelovar-record-breakers.opl (1).csv', skiprows=4)
+def process_powerlifting_data(input_dir='input'):
+    """
+    Obrađuje podatke o natjecanju iz input/ foldera.
     
-    # Check columns in detailed file
-    print(f"Columns in detailed file: {df_detailed.columns.tolist()}")
+    Args:
+        input_dir: Putanja do input foldera (default: 'input')
+    """
+    # Učitaj rezultate koristeći standardizirani loader
+    df_detailed = load_results(input_dir)
     
-    # Read the nominations file to get club information
-    # Skip the first 2 rows and use row 3 as header
-    df_nominations = pd.read_csv('bjelovar/Bjelovar-record-breakers-finalne-nominacije-2-1-3-1-1-1.csv', 
-                                sep=';', encoding='utf-8', skiprows=2)
+    # Učitaj podatke o klubovima koristeći standardizirani loader
+    club_mapping, birthyear_mapping = load_clubs(input_dir)
     
-    # Create a mapping of names to clubs from the nominations file
-    # Clean up the nominations data first
-    # Check if the expected columns exist
-    expected_cols = ['IME', 'PREZIME', 'KLUB']
-    available_cols = df_nominations.columns.tolist()
-    print(f"Available columns in nominations file: {available_cols}")
-    
-    # Find the correct column indices/names
-    name_col = None
-    surname_col = None
-    club_col = None
-    
-    for col in available_cols:
-        if col == 'IME':
-            name_col = col
-        elif col == 'PREZIME':  
-            surname_col = col
-        elif col == 'KLUB':
-            club_col = col
-    
-    print(f"Using columns - Name: {name_col}, Surname: {surname_col}, Club: {club_col}")
-    
-    # Filter and clean nominations data
-    df_nominations_clean = df_nominations.copy()
-    if name_col and surname_col and club_col:
-        df_nominations_clean = df_nominations_clean.dropna(subset=[name_col, surname_col, club_col])
-        df_nominations_clean = df_nominations_clean[df_nominations_clean[name_col].notna()]
-        df_nominations_clean = df_nominations_clean[df_nominations_clean[name_col] != '']
-    
-    # Create full names and club mapping
-    club_mapping = {}
-    if name_col and surname_col and club_col:
-        for _, row in df_nominations_clean.iterrows():
-            if pd.notna(row[name_col]) and pd.notna(row[surname_col]) and pd.notna(row[club_col]):
-                full_name = f"{row[name_col]} {row[surname_col]}"
-                club_mapping[full_name] = row[club_col]
-    else:
-        print("Could not find required columns for club mapping")
+    # Provjeri da li postoji kolona Division
+    if 'Division' not in df_detailed.columns:
+        raise ValueError("Datoteka rezultata ne sadrži kolonu 'Division'")
     
     # Filter out divisions starting with "Best"
     df_filtered = df_detailed[~df_detailed['Division'].str.startswith('Best', na=False)]
     
     # Remove rows where Place is NaN or empty (header rows, etc.)
-    df_filtered = df_filtered.dropna(subset=['Place'])
-    df_filtered = df_filtered[df_filtered['Place'] != '']
+    if 'Place' in df_filtered.columns:
+        df_filtered = df_filtered.dropna(subset=['Place'])
+        df_filtered = df_filtered[df_filtered['Place'] != '']
+
+    # Exclude NS (No Show) entries entirely from results
+    def is_ns_row(row):
+        place = str(row.get('Place', '')).strip().upper()
+        total = str(row.get('TotalKg', '')).strip().upper()
+        return place == 'NS' or total == 'NS'
+    ns_mask = df_filtered.apply(is_ns_row, axis=1)
+    if ns_mask.any():
+        removed_ns = df_filtered.loc[ns_mask, 'Name'].tolist()
+        removed_count = len(removed_ns)
+        try:
+            preview = ', '.join(removed_ns[:10])
+            more_text = f' ... (+{removed_count-10} vise)' if removed_count > 10 else ''
+            print(f"Uklonjeni NS zapisi: {preview}{more_text}")
+        except UnicodeEncodeError:
+            # Fallback ako ima problema s encodingom
+            print(f"Uklonjeno {removed_count} NS zapisa")
+    df_filtered = df_filtered[~ns_mask]
     
     # Create the output dataframe with requested columns
     output_data = []
     
+    # Helper funkcija za sigurno dohvaćanje kolone
+    def safe_get(row, col, default=''):
+        if col in row.index:
+            val = row[col]
+            return val if pd.notna(val) else default
+        return default
+    
     for _, row in df_filtered.iterrows():
-        # Get club from mapping, or use empty string if not found
-        club = club_mapping.get(row['Name'], '')
+        # Get club from mapping using normalized name
+        normalized_name = str(row['Name']).strip().lower()
+        club = club_mapping.get(normalized_name, '')
         
-        # Calculate IPF GL Points
-        ipf_points = calculate_ipf_gl_points(
-            bodyweight=pd.to_numeric(row['BodyweightKg'], errors='coerce'),
-            total=pd.to_numeric(row['TotalKg'], errors='coerce'),
-            sex=row['Sex'],
-            event=row['Event']
-        )
+        # Ako nema kluba u mapiranju, pokušaj iz kolone Team (OPL format)
+        if not club and 'Team' in row.index and pd.notna(row['Team']):
+            club = str(row['Team']).strip()
+        
+        # Dohvati godinu rođenja
+        birth_year_val = birthyear_mapping.get(normalized_name, np.nan)
+        if pd.isna(birth_year_val):
+            # Pokušaj iz kolone BirthYear ako postoji
+            if 'BirthYear' in row.index:
+                birth_year_val = pd.to_numeric(row['BirthYear'], errors='coerce')
+        
+        # Dohvati IPF GL Points iz podataka (ako postoje)
+        # OPL format koristi "Points", standardni CSV format koristi "Goodlift"
+        ipf_points = None
+        
+        # Pokušaj prvo "Points" (OPL format)
+        if 'Points' in row.index and pd.notna(row['Points']):
+            ipf_points = pd.to_numeric(row['Points'], errors='coerce')
+        
+        # Ako nema Points, pokušaj "Goodlift" (standardni CSV format)
+        if (ipf_points is None or pd.isna(ipf_points)) and 'Goodlift' in row.index and pd.notna(row['Goodlift']):
+            ipf_points = pd.to_numeric(row['Goodlift'], errors='coerce')
+        
+        # Fallback: izračunaj ako nema u podacima (rijetko će se dogoditi)
+        if ipf_points is None or pd.isna(ipf_points) or ipf_points == 0:
+            bodyweight = pd.to_numeric(safe_get(row, 'BodyweightKg'), errors='coerce')
+            total = pd.to_numeric(safe_get(row, 'TotalKg'), errors='coerce')
+            ipf_points = calculate_ipf_gl_points(
+                bodyweight=bodyweight,
+                total=total,
+                sex=row['Sex'],
+                event=row['Event']
+            )
+            # Log ako se koristi fallback (može biti znak problema s podacima)
+            try:
+                print(f"Napomena: Points izracunati za {row['Name']} (nema u podacima)")
+            except:
+                pass
+        
+        # Zaokruži na 2 decimale
+        if pd.notna(ipf_points):
+            ipf_points = round(float(ipf_points), 2)
+        else:
+            ipf_points = 0
+        
+        # Dodaj Equipment ako postoji u podacima
+        # Normaliziraj Equipment: Sleeves, Raw, Wraps = Raw; sve ostalo = Equipped
+        equipment = safe_get(row, 'Equipment', 'Raw')
+        division_str = str(row.get('Division', '')).lower()
+        
+        # Provjeri da li Division sadrži "-EQ" sufiks (Equipped)
+        if '-eq' in division_str or 'equipped' in division_str:
+            equipment = 'Equipped'
+        elif not equipment or equipment == '':
+            equipment = 'Raw'
+        else:
+            equipment_lower = str(equipment).lower().strip()
+            # Sleeves, Raw, Wraps su Raw format
+            if equipment_lower in ['sleeves', 'raw', 'wraps', 'straps']:
+                equipment = 'Raw'
+            else:
+                # Single-ply, Multi-ply, Unlimited, itd. su Equipped
+                equipment = 'Equipped'
         
         output_data.append({
-            'Place': row['Place'],
+            'Place': safe_get(row, 'Place'),
             'Name': row['Name'],
             'Club': club,
             'Sex': row['Sex'],
-            'BirthYear': row['BirthYear'],
+            'BirthYear': birth_year_val if not pd.isna(birth_year_val) else np.nan,
             'Division': row['Division'],
-            'BodyweightKg': row['BodyweightKg'],
-            'WeightClassKg': row['WeightClassKg'],
-            'Squat1Kg': row['Squat1Kg'],
-            'Squat2Kg': row['Squat2Kg'],
-            'Squat3Kg': row['Squat3Kg'],
-            'Best3SquatKg': row['Best3SquatKg'],
-            'Bench1Kg': row['Bench1Kg'],
-            'Bench2Kg': row['Bench2Kg'],
-            'Bench3Kg': row['Bench3Kg'],
-            'Best3BenchKg': row['Best3BenchKg'],
-            'Deadlift1Kg': row['Deadlift1Kg'],
-            'Deadlift2Kg': row['Deadlift2Kg'],
-            'Deadlift3Kg': row['Deadlift3Kg'],
-            'Best3DeadliftKg': row['Best3DeadliftKg'],
-            'TotalKg': row['TotalKg'],
+            'BodyweightKg': safe_get(row, 'BodyweightKg'),
+            'WeightClassKg': safe_get(row, 'WeightClassKg'),
+            'Squat1Kg': safe_get(row, 'Squat1Kg'),
+            'Squat2Kg': safe_get(row, 'Squat2Kg'),
+            'Squat3Kg': safe_get(row, 'Squat3Kg'),
+            'Best3SquatKg': safe_get(row, 'Best3SquatKg'),
+            'Bench1Kg': safe_get(row, 'Bench1Kg'),
+            'Bench2Kg': safe_get(row, 'Bench2Kg'),
+            'Bench3Kg': safe_get(row, 'Bench3Kg'),
+            'Best3BenchKg': safe_get(row, 'Best3BenchKg'),
+            'Deadlift1Kg': safe_get(row, 'Deadlift1Kg'),
+            'Deadlift2Kg': safe_get(row, 'Deadlift2Kg'),
+            'Deadlift3Kg': safe_get(row, 'Deadlift3Kg'),
+            'Best3DeadliftKg': safe_get(row, 'Best3DeadliftKg'),
+            'TotalKg': safe_get(row, 'TotalKg'),
             'Points': ipf_points,
-            'Event': row['Event']
+            'Event': row['Event'],
+            'Equipment': equipment
         })
     
     # Create output dataframe
     output_df = pd.DataFrame(output_data)
     
+    # Enforce that all competitors have a club
+    missing_club_mask = output_df['Club'].isna() | (output_df['Club'].astype(str).str.strip() == '')
+    if missing_club_mask.any():
+        missing_names = output_df.loc[missing_club_mask, 'Name'].tolist()
+        preview = ', '.join(missing_names[:10])
+        more = '' if len(missing_names) <= 10 else f" ... (+{len(missing_names) - 10} more)"
+        raise ValueError(f"Natjecatelji bez kluba: {preview}{more}. Dodajte klubove u '{input_dir}/klubovi.csv'.")
+
     # Save to CSV
     output_df.to_csv('powerlifting_results_processed.csv', index=False, encoding='utf-8')
     
@@ -145,13 +208,19 @@ def process_powerlifting_data():
     print(f"Found club information for {sum(1 for club in output_df['Club'] if club != '')} athletes")
     print("Output saved to 'powerlifting_results_processed.csv'")
     
-    # Display some sample data
-    print("\nFirst 5 records:")
-    print(output_df.head())
+    # Display some sample data (skip if encoding issues)
+    try:
+        print("\nFirst 5 records:")
+        print(output_df.head())
+    except UnicodeEncodeError:
+        print("\nFirst 5 records: (skipped due to encoding)")
     
     # Show unique divisions
-    print(f"\nUnique divisions (after filtering 'Best' divisions):")
-    print(output_df['Division'].unique())
+    try:
+        print(f"\nUnique divisions (after filtering 'Best' divisions):")
+        print(output_df['Division'].unique())
+    except UnicodeEncodeError:
+        print(f"\nUnique divisions count: {output_df['Division'].nunique()}")
 
 if __name__ == "__main__":
     process_powerlifting_data() 
