@@ -1,6 +1,6 @@
 # HPLS Powerlifting Data Processing System
 
-Standardizirani sistem za obradu rezultata powerlifting natjecanja i generiranje Excel izvještaja.
+Standardizirani sistem za obradu rezultata powerlifting natjecanja i generiranje Excel i PDF izvještaja.
 
 ## 🎯 Značajke
 
@@ -10,6 +10,7 @@ Standardizirani sistem za obradu rezultata powerlifting natjecanja i generiranje
 - **Raw/Equipped odvajanje** - odvojeni rangovi i Top 5 za Raw i Equipped natjecatelje
 - **Club Rankings** - rang klubova baziran na top-5 natjecatelja po klubu
 - **Formatiran Excel izvještaj** - profesionalno formatiran s bojama medalja, kategorijama i statistikom
+- **PDF izvještaj** - rezultati po kategorijama u PDF formatu (landscape A4)
 
 ## 📁 Struktura Projekta
 
@@ -19,11 +20,13 @@ obradarezultata/
 ├── data_loader.py                       # Učitavanje podataka (automatska detekcija formata)
 ├── process_powerlifting_data.py         # Obrada podataka i mapiranje klubova
 ├── create_excel_report.py               # Generiranje Excel izvještaja
+├── create_pdf_report.py                 # Generiranje PDF izvještaja
 ├── input/                               # INPUT folder
 │   ├── klubovi.csv                      # Podaci o klubovima (obavezno)
 │   └── rezultati.csv ili .opl.csv       # Rezultati natjecanja (jedan format)
 ├── powerlifting_results_processed.csv   # Obrađeni podaci (izlaz)
-└── rezultati.xlsx                       # Finalni Excel izvještaj (izlaz)
+├── rezultati.xlsx                       # Finalni Excel izvještaj (izlaz)
+└── rezultati.pdf                        # Finalni PDF izvještaj (izlaz)
 ```
 
 ## 🚀 Instalacija
@@ -80,7 +83,7 @@ Place,Name,Sex,Country,Equipment,Division,...
 python main.py
 ```
 
-Pipeline se sastoji od **2 koraka**:
+Pipeline se sastoji od **3 koraka**:
 
 1. **Obrada podataka**
    - Učitavanje rezultata i klubova
@@ -94,6 +97,12 @@ Pipeline se sastoji od **2 koraka**:
    - Rang klubova (Raw i Equipped odvojeno)
    - Top 5 statistika (Raw i Equipped odvojeno)
    - Generira: `rezultati.xlsx`
+
+3. **Generiranje PDF izvještaja**
+   - Rezultati po kategorijama (bez rangova i statistike)
+   - Redoslijed: Muški PL → Ženski PL → Muški Bench → Ženski Bench
+   - Landscape A4 format
+   - Generira: `rezultati.pdf`
 
 ## 📈 Excel Izvještaj - Sadržaj
 
@@ -197,6 +206,33 @@ Sistem prepoznaje sljedeće kategorije:
 - **Equipped naslovi:** Narančasta (#C65911)
 - **Auto-fit kolone:** Automatski prilagođena širina
 
+## 📄 PDF Izvještaj - Sadržaj
+
+PDF izvještaj sadrži samo rezultate po kategorijama (bez rangova i statistike):
+
+### Struktura PDF-a:
+1. **MUSKI POWERLIFTING**
+   - Raw rezultati po kategorijama
+   - Equipped rezultati (ako postoje)
+
+2. **ZENSKI POWERLIFTING**
+   - Raw rezultati po kategorijama
+   - Equipped rezultati (ako postoje)
+
+3. **MUSKI POTISAK S KLUPE**
+   - Raw rezultati po kategorijama
+   - Equipped rezultati (ako postoje)
+
+4. **ZENSKI POTISAK S KLUPE**
+   - Raw rezultati po kategorijama
+   - Equipped rezultati (ako postoje)
+
+### Format tablice (Powerlifting):
+| # | Ime i prezime | Klub | God. | TM | Cucanj | Potisak | M. dizanje | Ukupno | GL |
+
+### Format tablice (Bench Only):
+| # | Ime i prezime | Klub | God. | TM | Potisak 1 | Potisak 2 | Potisak 3 | Najbolji | GL |
+
 ## 📋 Primjer Output-a
 
 ```
@@ -205,9 +241,10 @@ SVI KORACI USPJESNO ZAVRSENI!
 ============================================================
 Kreirane datoteke:
    - powerlifting_results_processed.csv (obradeni podaci)
-   - rezultati.xlsx (finalni izvjestaj)
+   - rezultati.xlsx (finalni Excel izvjestaj)
+   - rezultati.pdf (finalni PDF izvjestaj)
 
-Gotovo! Excel izvjestaj je spreman za koristenje.
+Gotovo! Izvjestaji su spremni za koristenje.
 ```
 
 ## 🐛 Troubleshooting
@@ -222,6 +259,10 @@ Gotovo! Excel izvjestaj je spreman za koristenje.
 
 ### Greška: "Permission denied: rezultati.xlsx"
 - Zatvori Excel datoteku ako je otvorena
+- Pokreni ponovno
+
+### Greška: "Permission denied: rezultati.pdf"
+- Zatvori PDF datoteku ako je otvorena
 - Pokreni ponovno
 
 ### Encoding problemi (čćšđž)
@@ -246,12 +287,12 @@ Gotovo! Excel izvjestaj je spreman za koristenje.
 ## 📚 Dodatne Informacije
 
 - Python 3.8+
-- Dependencies: `pandas`, `openpyxl`, `numpy`
+- Dependencies: `pandas`, `openpyxl`, `numpy`, `reportlab`
 - Testiran na Windows 10/11
 - Unicode support za hrvatska slova (čćšđž)
 
 ---
 
 **Razvio:** HPLS Data Processing Team  
-**Verzija:** 2.0 (Standardizirana)  
+**Verzija:** 2.1 (PDF podrška)  
 **Datum:** 2025

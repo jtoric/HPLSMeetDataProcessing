@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 """
-Bjelovar Record Breakers - Complete Data Processing Pipeline
+HPLS - Powerlifting Results Processing Pipeline
 
-This script processes powerlifting competition data from two CSV files and generates
-a comprehensive Excel report with results, club rankings, and statistics.
+This script processes powerlifting competition data and generates
+comprehensive Excel and PDF reports with results and club rankings.
 
-Input files:
-- bjelovar/3-bjelovar-record-breakers.opl (1).csv (competition results)
-- bjelovar/Bjelovar-record-breakers-finalne-nominacije-2-1-3-1-1-1.csv (club nominations)
+Input files (in input/ folder):
+- rezultati.csv or rezultati.opl.csv (competition results)
+- klubovi.csv (club nominations with lifter data)
 
 Output:
-- Bjelovar_Record_Breakers_Rezultati.xlsx (final Excel report)
-
-Intermediate files created (preserved):
-- powerlifting_results_processed.csv
-- Male_Powerlifting.csv, Female_Powerlifting.csv
-- Male_Bench_Only.csv, Female_Bench_Only.csv  
-- Male_Powerlifting_Ranking.csv, Female_Powerlifting_Ranking.csv
-- Male_Bench_Only_Ranking.csv, Female_Bench_Only_Ranking.csv
+- powerlifting_results_processed.csv (processed data)
+- rezultati.xlsx (Excel report with rankings and statistics)
+- rezultati.pdf (PDF report with results by category)
 """
 
 import os
@@ -80,21 +75,51 @@ def run_excel_report_creation():
     - Statistics (Top 5 performers by category)
     """
     print("\n" + "="*60)
-    print("KORAK 4: Kreiranje Excel izvještaja")
+    print("KORAK 2: Kreiranje Excel izvjestaja")
     print("="*60)
     
     try:
         from create_excel_report import create_pretty_excel
         
         # Create single Excel with all results (Raw and Equipped)
-        print("\nKreiranje Excel izvještaja...")
+        print("\nKreiranje Excel izvjestaja...")
         create_pretty_excel(equipment_filter=None, output_filename='rezultati.xlsx')
-        print("[OK] Excel izvještaj kreiran: rezultati.xlsx")
+        print("[OK] Excel izvjestaj kreiran: rezultati.xlsx")
         
         return True
         
     except Exception as e:
         print(f"\n[GRESKA] Greska u kreiranju Excel izvjestaja: {e}")
+        return False
+
+
+def run_pdf_report_creation():
+    """
+    Step 3: Create PDF report with results.
+    
+    Creates rezultati.pdf with:
+    - Male Powerlifting results by category
+    - Female Powerlifting results by category
+    - Male Bench Only results by category
+    - Female Bench Only results by category
+    """
+    print("\n" + "="*60)
+    print("KORAK 3: Kreiranje PDF izvjestaja")
+    print("="*60)
+    
+    try:
+        from create_pdf_report import create_pdf_report
+        
+        print("\nKreiranje PDF izvjestaja...")
+        create_pdf_report(output_filename='rezultati.pdf')
+        print("[OK] PDF izvjestaj kreiran: rezultati.pdf")
+        
+        return True
+        
+    except Exception as e:
+        print(f"\n[GRESKA] Greska u kreiranju PDF izvjestaja: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def main(input_dir='input'):
@@ -123,13 +148,18 @@ def main(input_dir='input'):
         print("\n[GRESKA] Pipeline prekinut na koraku: Kreiranje Excel izvjestaja")
         sys.exit(1)
     
+    if not run_pdf_report_creation():
+        print("\n[GRESKA] Pipeline prekinut na koraku: Kreiranje PDF izvjestaja")
+        sys.exit(1)
+    
     print("\n" + "="*60)
     print("SVI KORACI USPJESNO ZAVRSENI!")
     print("="*60)
     print("Kreirane datoteke:")
     print("   - powerlifting_results_processed.csv (obradeni podaci)")
-    print("   - rezultati.xlsx (finalni izvjestaj)")
-    print("\nGotovo! Excel izvjestaj je spreman za koristenje.")
+    print("   - rezultati.xlsx (finalni Excel izvjestaj)")
+    print("   - rezultati.pdf (finalni PDF izvjestaj)")
+    print("\nGotovo! Izvjestaji su spremni za koristenje.")
 
 if __name__ == "__main__":
     main() 
